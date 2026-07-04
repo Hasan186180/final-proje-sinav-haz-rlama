@@ -1,0 +1,8 @@
+.env
+*.db
+*.pyc
+__pycache__/
+.streamlit/
+venv/
+.agents/
+.gemini/
