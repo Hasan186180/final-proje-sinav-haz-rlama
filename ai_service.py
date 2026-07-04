@@ -8,7 +8,13 @@ import os
 import re
 from typing import Optional
 
-import google.generativeai as genai
+try:
+    from google import genai
+    from google.genai import types as genai_types
+    _NEW_SDK = True
+except ImportError:
+    import google.generativeai as genai
+    _NEW_SDK = False
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -64,19 +70,38 @@ Zorluk seviyesine göre soru zorluğunu ayarla:
 #  Gemini servisi                                                               #
 # --------------------------------------------------------------------------- #
 
-def _get_gemini_model(model_name: str = "gemini-2.0-flash"):
+def _call_gemini(prompt: str, model_name: str = "gemini-2.0-flash", json_mode: bool = True) -> str:
+    """Yeni google-genai veya eski google-generativeai SDK'sı ile Gemini'yi çağırır."""
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
-        raise ValueError("GEMINI_API_KEY bulunamadı. Lütfen .env dosyasına ekleyin.")
-    genai.configure(api_key=api_key)
-    return genai.GenerativeModel(
-        model_name=model_name,
-        generation_config=genai.GenerationConfig(
-            response_mime_type="application/json",
-            temperature=0.7,
-            top_p=0.9,
-        ),
-    )
+        raise ValueError("GEMINI_API_KEY bulunamadı. Lütfen .env dosyasına veya Streamlit Secrets'a ekleyin.")
+
+    if _NEW_SDK:
+        client = genai.Client(api_key=api_key)
+        if json_mode:
+            config = genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.7,
+            )
+        else:
+            config = genai_types.GenerateContentConfig(temperature=0.7)
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=config,
+        )
+        return response.text
+    else:
+        # Eski SDK fallback
+        genai.configure(api_key=api_key)
+        generation_config = (
+            genai.GenerationConfig(response_mime_type="application/json", temperature=0.7)
+            if json_mode
+            else genai.GenerationConfig(temperature=0.7)
+        )
+        model = genai.GenerativeModel(model_name=model_name, generation_config=generation_config)
+        response = model.generate_content(prompt)
+        return response.text
 
 
 def generate_with_gemini(
@@ -86,12 +111,10 @@ def generate_with_gemini(
     model_name: str = "gemini-2.0-flash",
 ) -> dict:
     """Gemini API ile sınav içeriği üretir."""
-    model = _get_gemini_model(model_name)
     prompt = PROMPT_TEMPLATE.format(
         konu=konu, zorluk=zorluk, soru_sayisi=soru_sayisi
     )
-    response = model.generate_content(prompt)
-    return _parse_response(response.text)
+    return _parse_response(_call_gemini(prompt, model_name=model_name, json_mode=True))
 
 
 # --------------------------------------------------------------------------- #
@@ -309,9 +332,8 @@ def generate_single_question(
     else:
         # Gemini
         _model = model_name or "gemini-2.0-flash"
-        model = _get_gemini_model(_model)
-        response = model.generate_content(prompt)
-        return _parse_single_question(response.text)
+        raw = _call_gemini(prompt, model_name=_model, json_mode=True)
+        return _parse_single_question(raw)
 
 
 def generate_quiz_recommendation(
@@ -352,14 +374,7 @@ def generate_quiz_recommendation(
         return response.choices[0].message.content
         
     else:
-        # Gemini
-        # Tavsiye metni JSON olmak zorunda olmadığı için normal GenerativeModel kullanalım
-        api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY bulunamadı.")
-        genai.configure(api_key=api_key)
+        # Gemini — tavsiye metni JSON olmak zorunda değil
         _model = model_name or "gemini-2.0-flash"
-        model = genai.GenerativeModel(_model)
-        response = model.generate_content(prompt)
-        return response.text
+        return _call_gemini(prompt, model_name=_model, json_mode=False)
 

@@ -571,7 +571,7 @@ def render_export_buttons(sinav: dict, meta: dict) -> None:
 with st.sidebar:
     logo_path = os.path.join(os.path.dirname(__file__), "assets", "logo.png")
     if os.path.exists(logo_path):
-        st.image(logo_path, use_column_width=True)
+        st.image(logo_path, width=250)
     else:
         st.markdown(
             """
